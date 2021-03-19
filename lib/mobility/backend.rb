@@ -1,4 +1,6 @@
 # frozen-string-literal: true
+require 'digest/md5'
+
 module Mobility
 =begin
 
@@ -130,6 +132,10 @@ On top of this, a backend will normally:
     # Extend included class with +setup+ method and other class methods
     def self.included(base)
       base.extend ClassMethods
+      base.singleton_class.class_eval do
+        attr_accessor :options, :model_class
+        protected :options=, :model_class=
+      end
     end
 
     # Defines setup hooks for backend to customize model class.
@@ -170,7 +176,16 @@ On top of this, a backend will normally:
       # @param [Hash] options
       # @return [Class] backend subclass
       def build_subclass(model_class, options)
-        ConfiguredBackend.build(self, model_class, options)
+        Class.new(self).tap do |klass|
+          klass.model_class = model_class
+          klass.configure(options) if klass.respond_to?(:configure)
+          klass.options = options.freeze
+
+          subclass_name = SubclassNameGenerator.call(model_class, self, options)
+          if subclass_name && !Object.const_defined?(subclass_name)
+            Object.const_set(subclass_name, klass)
+          end
+        end
       end
 
       # Create instance and class methods to access value on options hash
@@ -224,46 +239,15 @@ On top of this, a backend will normally:
       end
     end
 
-    class ConfiguredError < StandardError; end
-    class UnconfiguredError < StandardError; end
-=begin
-
-Module included in configured backend classes, which in addition to methods on
-the parent backend class also have a +model_class+ and set of +options+.
-
-=end
-    module ConfiguredBackend
-      def self.build(backend_class, model_class, options)
-        Class.new(backend_class) do
-          extend ConfiguredBackend
-
-          @model_class = model_class
-          configure(options) if respond_to?(:configure)
-          @options = options.freeze
+    module SubclassNameGenerator
+      def self.call(model_class, backend_class, options)
+        # If the model class and backend have names, we give the backend subclass a name
+        if model_class.name && backend_class.name
+          class_name_str = model_class.name.gsub('::', '_')
+          backend_name_str = backend_class.name.gsub('::', '_')
+          options_str = ::Digest::MD5.hexdigest(options.sort.inspect)[0..5]
+          [class_name_str, backend_name_str, options_str].join('__')
         end
-      end
-
-      def self.extended(klass)
-        klass.singleton_class.attr_reader :options, :model_class
-      end
-
-      # Call setup block on a class with attributes and options.
-      # @param model_class Class to be setup-ed
-      # @param [Array<String>] attribute_names
-      # @param [Hash] options
-      def setup_model(model_class, attribute_names)
-        return unless setup_block = @setup_block
-        exec_setup_block(model_class, attribute_names, options, self, &setup_block)
-      end
-
-      def inherited(_)
-        raise ConfiguredError, "Configured backends cannot be subclassed."
-      end
-
-      # Show subclassed backend class name, if it has one.
-      # @return [String]
-      def inspect
-        (name = superclass.name) ? "#<#{name}>" : super
       end
     end
   end
