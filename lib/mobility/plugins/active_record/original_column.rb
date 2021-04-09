@@ -41,16 +41,11 @@ Plugin to use an original column for a given locale, and otherwise use the backe
         module BackendClassMethods
           def build_node(attr, locale)
             if locale == I18n.default_locale
-              # is the MobilityExpressions plugin necessary here?
-              model_class.arel_table[attr].extend(Plugins::Arel::MobilityExpressions)
+              model_class.arel_table[attr]
             else
               super
             end
           end
-
-          # def apply_scope
-          #   super
-          # end
         end
       end
     end
