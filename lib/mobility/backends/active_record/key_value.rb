@@ -192,7 +192,7 @@ Implements the {Mobility::Backends::KeyValue} backend for ActiveRecord models.
         end
 
         # Ensure we only call after destroy hook once per translations class
-        translation_classes = [translation_class, *Mobility::Backends::ActiveRecord::KeyValue::Translation.descendants].uniq
+        translation_classes = [translation_class, *translation_class.descendants].uniq
         after_destroy do
           @mobility_after_destroy_translation_classes = [] unless defined?(@mobility_after_destroy_translation_classes)
           (translation_classes - @mobility_after_destroy_translation_classes).each { |klass| klass.where(belongs_to => self).destroy_all }
