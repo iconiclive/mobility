@@ -57,9 +57,7 @@ Implements the {Mobility::Backends::Container} backend for Sequel models.
         end
       end
 
-      backend = self
-
-      setup do |attributes, options|
+      setup do |attributes, options, backend_class|
         column_name = options[:column_name]
         mod = Module.new do
           define_method :before_validation do
@@ -71,7 +69,7 @@ Implements the {Mobility::Backends::Container} backend for Sequel models.
           end
         end
         include mod
-        backend.define_hash_initializer(mod, [column_name])
+        backend_class.define_hash_initializer(mod, [column_name])
 
         plugin :defaults_setter
         attributes.each { |attribute| default_values[attribute.to_sym] = {} }
@@ -102,7 +100,7 @@ Implements the {Mobility::Backends::Container} backend for Sequel models.
       # @return [Mobility::Backends::Sequel::Container::JSONOp,Mobility::Backends::Sequel::Container::JSONBOp]
       def self.build_op(attr, locale)
         klass = const_get("#{options[:column_type].upcase}Op")
-        klass.new(klass.new(column_name.to_sym)[locale.to_s]).get_text(attr)
+        klass.new(klass.new(column_name.to_sym).get(locale.to_s)).get_text(attr)
       end
 
       class JSONOp < ::Sequel::Postgres::JSONOp; end

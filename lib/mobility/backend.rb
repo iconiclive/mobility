@@ -23,8 +23,8 @@ On top of this, a backend will normally:
   corresponding to valid keys for configuring this backend.
 - implement a +configure+ class method to apply any normalization to the
   keys on the options hash included in +valid_keys+
-- call the +setup+ method yielding attributes and options to configure the
-  model class
+- call the +setup+ method yielding attributes and options (and optionally the
+  configured backend class) to configure the model class
 
 @example Defining a Backend
   class MyBackend
@@ -49,6 +49,13 @@ On top of this, a backend will normally:
     setup do |attributes, options|
       # Do something with attributes and options in context of model class.
     end
+
+    # The block can optionally take the configured backend class as its third
+    # argument:
+    #
+    # setup do |attributes, options, backend_class|
+    #   ...
+    # end
   end
 
 @see Mobility::Translations
@@ -147,9 +154,11 @@ On top of this, a backend will normally:
       def setup &block
         if @setup_block
           setup_block = @setup_block
-          @setup_block = lambda do |*args|
-            class_exec(*args, &setup_block)
-            class_exec(*args, &block)
+          exec_setup_block = method(:exec_setup_block)
+          @setup_block = lambda do |attributes, options, backend_class|
+            [setup_block, block].each do |blk|
+              exec_setup_block.call(self, attributes, options, backend_class, &blk)
+            end
           end
         else
           @setup_block = block
@@ -158,17 +167,6 @@ On top of this, a backend will normally:
 
       def inherited(subclass)
         subclass.instance_variable_set(:@setup_block, @setup_block)
-        subclass.instance_variable_set(:@options, @options)
-        subclass.instance_variable_set(:@model_class, @model_class)
-      end
-
-      # Call setup block on a class with attributes and options.
-      # @param model_class Class to be setup-ed
-      # @param [Array<String>] attribute_names
-      # @param [Hash] options
-      def setup_model(model_class, attribute_names)
-        return unless setup_block = @setup_block
-        model_class.class_exec(attribute_names, options, &setup_block)
       end
 
       # Build a subclass of this backend class for a given set of options
@@ -204,10 +202,30 @@ On top of this, a backend will normally:
         EOM
       end
 
-      # Show useful information about this backend class, if it has no name.
-      # @return [String]
-      def inspect
-        name ? super : "#<#{superclass.name}>"
+      def options
+        raise_unconfigured!(:options)
+      end
+
+      def model_class
+        raise_unconfigured!(:model_class)
+      end
+
+      def setup_model(_model_class, _attributes)
+        raise_unconfigured!(:setup_model)
+      end
+
+      private
+
+      def raise_unconfigured!(method_name)
+        raise UnconfiguredError, "You are calling #{method_name} on an unconfigured backend class."
+      end
+
+      def exec_setup_block(model_class, *args, &block)
+        if block.arity == 3
+          model_class.class_exec(*args[0..2], &block)
+        else
+          model_class.class_exec(*args[0..1], &block)
+        end
       end
     end
 

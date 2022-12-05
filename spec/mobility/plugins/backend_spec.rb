@@ -19,7 +19,8 @@ describe Mobility::Plugins::Backend, type: :plugin do
 
   describe "#included" do
     it "calls build_subclass on backend class with options merged with default options" do
-      expect(backend_class).to receive(:build_subclass).with(model_class, hash_including(foo: "bar")).and_return(Class.new(backend_class))
+      configured_backend_class = double.as_null_object
+      expect(backend_class).to receive(:build_subclass).with(model_class, hash_including(foo: "bar")).and_return(configured_backend_class)
       translations = translations_class.new("title", backend: backend_class, foo: "bar")
       model_class.include translations
     end
@@ -33,11 +34,13 @@ describe Mobility::Plugins::Backend, type: :plugin do
     it "freezes backend options after inclusion into model class" do
       translations = translations_class.new("title", backend: backend_class)
       model_class.include translations
-      expect(backend_class.options).to be_frozen
+      expect(translations.backend_class.options).to be_frozen
     end
 
     it "calls setup_model on backend class with model_class and attributes" do
-      expect(backend_class).to receive(:setup_model).with(model_class, ["title"])
+      configured_backend_class = double("configured backend class")
+      allow(backend_class).to receive(:build_subclass).and_return(configured_backend_class)
+      expect(configured_backend_class).to receive(:setup_model).with(model_class, ["title"])
       model_class.include translations_class.new("title", backend: backend_class)
     end
 
@@ -109,9 +112,30 @@ describe Mobility::Plugins::Backend, type: :plugin do
         mod1 = translations_class.new("title", backend: backend_class_1)
         model_class.include mod1
 
-        Class.new(model_class)
+        # accessing mobility_backend_classes necessary to trigger parent freeze
+        Class.new(model_class).send(:mobility_backend_classes)
 
         expect(model_class.send(:mobility_backend_classes)).to be_frozen
+      end
+
+      it "works with subclasses of subclasses" do
+        backend_class_1 = Class.new
+        backend_class_1.include Mobility::Backend
+
+        model_subclass = Class.new(model_class)
+        model_subclass_2 = Class.new(model_subclass)
+
+        # we specifically include translations after subclassing
+        mod1 = translations_class.new("title", backend: backend_class_1)
+        model_class.include mod1
+
+        title_backend_class_1 = model_class.mobility_backend_class("title")
+        title_backend_class_2 = model_subclass.mobility_backend_class("title")
+        title_backend_class_3 = model_subclass_2.mobility_backend_class("title")
+
+        expect(title_backend_class_1).to be <(backend_class_1)
+        expect(title_backend_class_2).to be <(backend_class_1)
+        expect(title_backend_class_3).to be <(backend_class_1)
       end
     end
 
@@ -294,8 +318,10 @@ describe Mobility::Plugins::Backend, type: :plugin do
         expect(translations_class.new("title").inspect).to eq("#<Translations (FooBackend) @names=title>")
       end
 
-      it "calls setup_model on backend" do
-        expect(FooBackend).to receive(:setup_model).with(model_class, ["title"])
+      it "calls setup_model on configured backend" do
+        configured_backend_class = double
+        expect(FooBackend).to receive(:build_subclass).with(model_class, backend: [:foo, {}]).and_return(configured_backend_class)
+        expect(configured_backend_class).to receive(:setup_model).with(model_class, ["title"])
         model_class.include translations_class.new("title")
       end
     end
