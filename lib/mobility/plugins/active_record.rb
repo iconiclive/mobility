@@ -4,7 +4,11 @@ require_relative "./active_record/dirty"
 require_relative "./active_record/cache"
 require_relative "./active_record/query"
 require_relative "./active_record/uniqueness_validation"
+<<<<<<< HEAD
 require_relative "./active_record/original_column"
+=======
+require_relative "./active_record/column_fallback"
+>>>>>>> afeb067488f215cb469cfc9d7ad0a3853ae8ac5d
 
 module Mobility
 =begin
@@ -26,6 +30,7 @@ dirty for active_record_dirty) is also enabled.
       requires :active_record_query
       requires :active_record_uniqueness_validation
       requires :active_record_original_column
+      requires :active_record_column_fallback
 
 
       included_hook do |klass|

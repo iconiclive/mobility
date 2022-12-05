@@ -22,7 +22,7 @@ describe Mobility::Plugins::FallthroughAccessors, type: :plugin do
     it_behaves_like "locale accessor", :title, 'en'
     it_behaves_like "locale accessor", :title, 'de'
     it_behaves_like "locale accessor", :title, 'pt-BR'
-    it_behaves_like "locale accessor", :title, 'ru'
+    it_behaves_like "locale accessor", :title, 'rus'
 
     it 'passes arguments and options to super when method does not match' do
       mod = Module.new do
@@ -38,6 +38,22 @@ describe Mobility::Plugins::FallthroughAccessors, type: :plugin do
 
       options = { some: 'params' }
       expect(instance.foo(**options)).to eq([options])
+    end
+
+    it 'passes kwargs to super when method does not match' do
+      mod = Module.new do
+        def method_missing(method_name, *args, **kwargs, &block)
+          (method_name == :foo) ? [args, kwargs] : super
+        end
+      end
+
+      model_class = Class.new
+      model_class.include translations, mod
+
+      instance = model_class.new
+
+      kwargs = { some: 'params' }
+      expect(instance.foo(**kwargs)).to eq([[], kwargs])
     end
 
     it 'does not pass on empty keyword options hash to super' do

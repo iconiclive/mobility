@@ -51,6 +51,63 @@ Implements the {Mobility::Backends::KeyValue} backend for Sequel models.
           end
         end
 
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_one_to_many_association(klass, attributes)
+          belongs_to_id     = :"#{belongs_to}_id"
+          belongs_to_type   = :"#{belongs_to}_type"
+
+          # Track all attributes for this association, so that we can limit the scope
+          # of keys for the association to only these attributes. We need to track the
+          # attributes assigned to the association in case this setup code is called
+          # multiple times, so we don't "forget" earlier attributes.
+          #
+          attrs_method_name = :"#{association_name}_attributes"
+          association_attributes = (klass.instance_variable_get(:"@#{attrs_method_name}") || []) + attributes
+          klass.instance_variable_set(:"@#{attrs_method_name}", association_attributes)
+
+          klass.one_to_many association_name,
+            reciprocal:      belongs_to,
+            key:             belongs_to_id,
+            reciprocal_type: :one_to_many,
+            conditions:      { belongs_to_type => klass.to_s, key_column => association_attributes },
+            adder:           proc { |translation| translation.update(belongs_to_id => pk, belongs_to_type => self.class.to_s) },
+            remover:         proc { |translation| translation.update(belongs_to_id => nil, belongs_to_type => nil) },
+            clearer:         proc { send_(:"#{association_name}_dataset").update(belongs_to_id => nil, belongs_to_type => nil) },
+            class:           class_name
+        end
+
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_save_callbacks(klass, attributes)
+          b = self
+          callback_methods = Module.new do
+            define_method :before_save do
+              super()
+              send(b.association_name).select { |t| attributes.include?(t.__send__(b.key_column)) && Util.blank?(t.__send__(b.value_column)) }.each(&:destroy)
+            end
+            define_method :after_save do
+              super()
+              attributes.each { |attribute| mobility_backends[attribute].save_translations }
+            end
+          end
+          klass.include callback_methods
+        end
+
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_after_destroy_callback(klass)
+          # Clean up *all* leftover translations of this model, only once.
+          b = self
+          translation_classes = [class_name, *Mobility::Backends::Sequel::KeyValue::Translation.descendants].uniq
+          klass.define_method :after_destroy do
+            super()
+
+            @mobility_after_destroy_translation_classes = [] unless defined?(@mobility_after_destroy_translation_classes)
+            (translation_classes - @mobility_after_destroy_translation_classes).each do |translation_class|
+              translation_class.where(:"#{b.belongs_to}_id" => id, :"#{b.belongs_to}_type" => self.class.name).destroy
+            end
+            @mobility_after_destroy_translation_classes += translation_classes
+          end
+        end
+
         private
 
         def join_translations(dataset, attr, locale, join_type)
@@ -74,7 +131,7 @@ Implements the {Mobility::Backends::KeyValue} backend for Sequel models.
             visit_sql_identifier(predicate, locale)
           when ::Sequel::SQL::BooleanExpression
             visit_boolean(predicate, locale)
-          when ::Sequel::SQL::Expression
+          when ::Sequel::SQL::ComplexExpression
             visit(predicate.args, locale)
           else
             {}
@@ -123,61 +180,13 @@ Implements the {Mobility::Backends::KeyValue} backend for Sequel models.
         end
       end
 
-      backend = self
+      setup do |attributes, _options, backend_class|
+        backend_class.define_one_to_many_association(self, attributes)
+        backend_class.define_save_callbacks(self, attributes)
+        backend_class.define_after_destroy_callback(self)
 
-      setup do |attributes, options|
-        association_name  = options[:association_name]
-        translation_class = options[:class_name]
-        key_column        = options[:key_column]
-        value_column      = options[:value_column]
-        belongs_to        = options[:belongs_to]
-        belongs_to_id     = :"#{belongs_to}_id"
-        belongs_to_type   = :"#{belongs_to}_type"
-
-        # Track all attributes for this association, so that we can limit the scope
-        # of keys for the association to only these attributes. We need to track the
-        # attributes assigned to the association in case this setup code is called
-        # multiple times, so we don't "forget" earlier attributes.
-        #
-        attrs_method_name = :"#{association_name}_attributes"
-        association_attributes = (instance_variable_get(:"@#{attrs_method_name}") || []) + attributes
-        instance_variable_set(:"@#{attrs_method_name}", association_attributes)
-
-        one_to_many association_name,
-          reciprocal:      belongs_to,
-          key:             belongs_to_id,
-          reciprocal_type: :one_to_many,
-          conditions:      { belongs_to_type => self.to_s, key_column => association_attributes },
-          adder:           proc { |translation| translation.update(belongs_to_id => pk, belongs_to_type => self.class.to_s) },
-          remover:         proc { |translation| translation.update(belongs_to_id => nil, belongs_to_type => nil) },
-          clearer:         proc { send_(:"#{association_name}_dataset").update(belongs_to_id => nil, belongs_to_type => nil) },
-          class:           translation_class
-
-        callback_methods = Module.new do
-          define_method :before_save do
-            super()
-            send(association_name).select { |t| attributes.include?(t.__send__(key_column)) && Util.blank?(t.__send__(value_column)) }.each(&:destroy)
-          end
-          define_method :after_save do
-            super()
-            attributes.each { |attribute| mobility_backends[attribute].save_translations }
-          end
-        end
-        include callback_methods
-
-        # Clean up *all* leftover translations of this model, only once.
-        translation_classes = [translation_class, *Mobility::Backends::Sequel::KeyValue::Translation.descendants].uniq
-        define_method :after_destroy do
-          super()
-
-          @mobility_after_destroy_translation_classes = [] unless defined?(@mobility_after_destroy_translation_classes)
-          (translation_classes - @mobility_after_destroy_translation_classes).each do |klass|
-            klass.where(belongs_to_id => id, belongs_to_type => self.class.name).destroy
-          end
-          @mobility_after_destroy_translation_classes += translation_classes
-        end
         include(mod = Module.new)
-        backend.define_column_changes(mod, attributes)
+        backend_class.define_column_changes(mod, attributes)
       end
 
       # Returns translation for a given locale, or initializes one if none is present.

@@ -4,11 +4,15 @@ on:
   push:
     branches:
       - master
+      - 1-2
+      - 1-1
       - 1-0
       - 0-8
   pull_request:
     branches:
       - master
+      - 1-2
+      - 1-1
       - 1-0
       - 0-8
 
@@ -21,6 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         ruby:
+          - '3.0'
           - '2.7'
           - '2.6'
         database:
@@ -40,11 +45,17 @@ jobs:
             version: '6.0'
           - name: 'active_record'
             version: '6.1'
+          - name: 'active_record'
+            version: '7.0'
           - name: 'sequel'
             version: '5'
         experimental: [false]
         feature: ['unit']
         include:
+          - ruby: '3.0'
+            feature: 'unit'
+            orm:
+            experimental: false
           - ruby: '2.7'
             feature: 'unit'
             orm:
@@ -53,15 +64,45 @@ jobs:
             feature: 'unit'
             orm:
             experimental: false
-          - ruby: '2.5'
+          - ruby: '3.0'
+            feature: 'rails'
+            orm:
+              name: 'active_record'
+              version: '7.0'
+            database: 'sqlite3'
+            experimental: false
+          - ruby: '3.0'
+            feature: 'performance'
+            experimental: false
+          - ruby: '3.0'
+            feature: 'i18n_fallbacks'
+            experimental: false
+          - ruby: '3.0'
+            database: 'sqlite3'
             feature: 'unit'
             orm:
-            experimental: false
+              name: 'active_record'
+              version: 'edge'
+            experimental: true
+          - ruby: '3.0'
+            database: 'mysql'
+            feature: 'unit'
+            orm:
+              name: 'active_record'
+              version: 'edge'
+            experimental: true
+          - ruby: '3.0'
+            database: 'postgres'
+            feature: 'unit'
+            orm:
+              name: 'active_record'
+              version: 'edge'
+            experimental: true
           - ruby: '2.7'
             feature: 'rails'
             orm:
               name: 'active_record'
-              version: '6.1'
+              version: '7.0'
             database: 'sqlite3'
             experimental: false
           - ruby: '2.7'
@@ -75,27 +116,47 @@ jobs:
             feature: 'unit'
             orm:
               name: 'active_record'
-              version: '7.0'
+              version: 'edge'
             experimental: true
           - ruby: '2.7'
             database: 'mysql'
             feature: 'unit'
             orm:
               name: 'active_record'
-              version: '7.0'
+              version: 'edge'
             experimental: true
           - ruby: '2.7'
             database: 'postgres'
             feature: 'unit'
             orm:
               name: 'active_record'
-              version: '7.0'
+              version: 'edge'
             experimental: true
         exclude:
+          - ruby: '2.6'
+            orm:
+              name: 'active_record'
+              version: '7.0'
           - ruby: '2.7'
             orm:
               name: 'active_record'
               version: '4.2'
+          - ruby: '3.0'
+            orm:
+              name: 'active_record'
+              version: '4.2'
+          - ruby: '3.0'
+            orm:
+              name: 'active_record'
+              version: '5.0'
+          - ruby: '3.0'
+            orm:
+              name: 'active_record'
+              version: '5.1'
+          - ruby: '3.0'
+            orm:
+              name: 'active_record'
+              version: '5.2'
     env:
       DB: ${{ matrix.database }}
       BUNDLE_JOBS: 4
@@ -133,9 +194,6 @@ jobs:
       - name: Install Postgres
         run: sudo apt-get install libpq-dev postgresql-client -y
         if: matrix.database == 'postgres'
-      - name: Install MySQL
-        run: sudo apt-get install libmysqlclient-dev mysql-client -y
-        if: matrix.database == 'mysql'
       - id: cache-bundler
         uses: actions/cache@v2
         with:
