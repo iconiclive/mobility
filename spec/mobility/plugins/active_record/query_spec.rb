@@ -160,7 +160,7 @@ describe Mobility::Plugins::ActiveRecord::Query, orm: :active_record, type: :plu
       m = ActiveRecord::Migration.new
       m.verbose = false
 
-      m.create_table :cars
+      m.create_table(:cars) { |t| t.string :name }
       stub_const('Car', Class.new(ActiveRecord::Base) do
         has_many :parking_lots
         has_many :car_parts
@@ -190,6 +190,32 @@ describe Mobility::Plugins::ActiveRecord::Query, orm: :active_record, type: :plu
       query = ParkingLot.includes(car: :car_parts).references(:car).merge(Car.i18n)
       expect { query.first }.not_to raise_error
       expect { query.order(:car_id) }.not_to raise_error
+      expect { query.select(:name) }.not_to raise_error
+    end
+  end
+
+  describe "regression for #564" do
+    it "works if translates is called multiple times" do
+      stub_const 'Article', Class.new(ActiveRecord::Base)
+      2.times { translates Article, :title, backend: :table }
+
+      article = Article.create(title: "Title")
+
+      expect(Article.i18n.where(title: "Title")).to eq([article])
+    end
+
+    it "handles intersecting attribute declarations" do
+      stub_const 'Article', Class.new(ActiveRecord::Base)
+      translates Article, :title, :content, backend: :key_value, type: :string
+
+      # title defined below clobbers title defined above
+      translates Article, :title, backend: :table
+
+      article1 = Article.create(title: "Title")
+      article2 = Article.create(title: "Title", content: "Content")
+
+      expect(Article.i18n.where(title: "Title")).to match_array([article1, article2])
+      expect(Article.i18n.where(title: "Title", content: "Content")).to eq([article2])
     end
   end
 end

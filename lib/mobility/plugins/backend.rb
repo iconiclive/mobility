@@ -45,7 +45,7 @@ Defines:
         klass.extend ClassMethods
 
         if backend
-          @backend_class = backend.build_subclass(klass, backend_options)
+          @backend_class = backend.build_subclass(klass, **backend_options)
 
           backend_class.setup_model(klass, names)
 
@@ -125,6 +125,14 @@ Defines:
           return self[name.to_sym] if String === name
           self[name] = @model.class.mobility_backend_class(name).new(@model, name.to_s)
         end
+
+        def marshal_dump
+          @model
+        end
+
+        def marshal_load(model)
+          @model = model
+        end
       end
 
       module InstanceMethods
@@ -151,16 +159,22 @@ Defines:
           raise KeyError, "No backend for: #{name}"
         end
 
-        def inherited(klass)
-          parent_classes = mobility_backend_classes.freeze # ensure backend classes are not modified after being inherited
-          klass.class_eval { @mobility_backend_classes = parent_classes.dup }
-          super
-        end
-
         protected
 
         def mobility_backend_classes
-          @mobility_backend_classes ||= {}
+          if @mobility_backend_classes
+            @mobility_backend_classes
+          else
+            @mobility_backend_classes = {}
+            parent_class = self.superclass
+            while parent_class&.respond_to?(:mobility_backend_classes, true)
+              # ensure backend classes are not modified after being inherited
+              parent_class_classes = parent_class.mobility_backend_classes.freeze
+              @mobility_backend_classes.merge!(parent_class_classes)
+              parent_class = parent_class.superclass
+            end
+            @mobility_backend_classes
+          end
         end
       end
 

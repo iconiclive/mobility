@@ -163,9 +163,8 @@ enabled for any one attribute on the model.
               define_method method_name do |*attrs, &block|
                 return super(*attrs, &block) if (method_name == 'select' && block.present?)
 
-                if ::ActiveRecord::VERSION::STRING < '7.0'
-                  return super(*attrs, &block) unless @klass.respond_to?(:mobility_attribute?)
-                end
+                return super(*attrs, &block) unless @klass.respond_to?(:mobility_attribute?)
+
                 return super(*attrs, &block) unless attrs.any?(&@klass.method(:mobility_attribute?))
 
                 keys = attrs.dup
@@ -223,10 +222,13 @@ enabled for any one attribute on the model.
 
                 keys, predicates = opts.keys.map(&:to_s), []
 
+                used_keys = []
+
                 query_map = mods.inject(IDENTITY) do |qm, mod|
-                  i18n_keys = mod.names & keys
+                  i18n_keys = mod.names & keys - used_keys
                   next qm if i18n_keys.empty?
 
+                  used_keys += i18n_keys
                   mod_predicates = i18n_keys.map do |key|
                     build_predicate(scope.backend_node(key.to_sym, locale), opts.delete(key))
                   end

@@ -65,6 +65,69 @@ Implements the {Mobility::Backends::KeyValue} backend for ActiveRecord models.
           end
         end
 
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_has_many_association(klass, attributes)
+          # Track all attributes for this association, so that we can limit the scope
+          # of keys for the association to only these attributes. We need to track the
+          # attributes assigned to the association in case this setup code is called
+          # multiple times, so we don't "forget" earlier attributes.
+          #
+          attrs_method_name = :"__#{association_name}_attributes"
+          association_attributes = (klass.instance_variable_get(:"@#{attrs_method_name}") || []) + attributes
+          klass.instance_variable_set(:"@#{attrs_method_name}", association_attributes)
+
+          b = self
+
+          klass.has_many association_name, ->{ where b.key_column => association_attributes },
+            as: belongs_to,
+            class_name: class_name.name,
+            inverse_of: belongs_to,
+            autosave:   true
+        end
+
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_initialize_dup(klass)
+          b = self
+          module_name = "MobilityArKeyValue#{association_name.to_s.camelcase}"
+          unless const_defined?(module_name)
+            callback_methods = Module.new do
+              define_method :initialize_dup do |source|
+                super(source)
+                self.send("#{b.association_name}=", source.send(b.association_name).map(&:dup))
+                # Set inverse on associations
+                send(b.association_name).each do |translation|
+                  translation.send(:"#{b.belongs_to}=", self)
+                end
+              end
+            end
+            klass.include const_set(module_name, callback_methods)
+          end
+        end
+
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_before_save_callback(klass)
+          b = self
+          klass.before_save do
+            send(b.association_name).select { |t| t.send(b.value_column).blank? }.each do |translation|
+              send(b.association_name).destroy(translation)
+            end
+          end
+        end
+
+        # Called from setup block. Can be overridden to customize behaviour.
+        def define_after_destroy_callback(klass)
+          # Ensure we only call after destroy hook once per translations class
+          b = self
+          translation_classes = [class_name, *Mobility::Backends::ActiveRecord::KeyValue::Translation.descendants].uniq
+          klass.after_destroy do
+            @mobility_after_destroy_translation_classes = [] unless defined?(@mobility_after_destroy_translation_classes)
+            (translation_classes - @mobility_after_destroy_translation_classes).each do |translation_class|
+              translation_class.where(b.belongs_to => self).destroy_all
+            end
+            @mobility_after_destroy_translation_classes += translation_classes
+          end
+        end
+
         private
 
         def join_translations(relation, key, locale, join_type)
@@ -75,7 +138,7 @@ Implements the {Mobility::Backends::KeyValue} backend for ActiveRecord models.
                          on(t[key_column].eq(key).
                             and(t[:locale].eq(locale).
                                 and(t[:"#{belongs_to}_type"].eq(model_class.base_class.name).
-                                    and(t[:"#{belongs_to}_id"].eq(m[:id]))))).join_sources)
+                                    and(t[:"#{belongs_to}_id"].eq(m[model_class.primary_key] || m[:id]))))).join_sources)
         end
 
         def already_joined?(relation, name, locale, join_type)
@@ -149,55 +212,11 @@ Implements the {Mobility::Backends::KeyValue} backend for ActiveRecord models.
         end
       end
 
-      setup do |attributes, options|
-        association_name  = options[:association_name]
-        translation_class = options[:class_name]
-        key_column         = options[:key_column]
-        value_column       = options[:value_column]
-        belongs_to         = options[:belongs_to]
-
-        # Track all attributes for this association, so that we can limit the scope
-        # of keys for the association to only these attributes. We need to track the
-        # attributes assigned to the association in case this setup code is called
-        # multiple times, so we don't "forget" earlier attributes.
-        #
-        attrs_method_name = :"__#{association_name}_attributes"
-        association_attributes = (instance_variable_get(:"@#{attrs_method_name}") || []) + attributes
-        instance_variable_set(:"@#{attrs_method_name}", association_attributes)
-
-        has_many association_name, ->{ where key_column => association_attributes },
-          as: belongs_to,
-          class_name: translation_class.name,
-          inverse_of: belongs_to,
-          autosave:   true
-        before_save do
-          send(association_name).select { |t| t.send(value_column).blank? }.each do |translation|
-            send(association_name).destroy(translation)
-          end
-        end
-
-        module_name = "MobilityArKeyValue#{association_name.to_s.camelcase}"
-        unless const_defined?(module_name)
-          callback_methods = Module.new do
-            define_method :initialize_dup do |source|
-              super(source)
-              self.send("#{association_name}=", source.send(association_name).map(&:dup))
-              # Set inverse on associations
-              send(association_name).each do |translation|
-                translation.send(:"#{belongs_to}=", self)
-              end
-            end
-          end
-          include const_set(module_name, callback_methods)
-        end
-
-        # Ensure we only call after destroy hook once per translations class
-        translation_classes = [translation_class, *translation_class.descendants].uniq
-        after_destroy do
-          @mobility_after_destroy_translation_classes = [] unless defined?(@mobility_after_destroy_translation_classes)
-          (translation_classes - @mobility_after_destroy_translation_classes).each { |klass| klass.where(belongs_to => self).destroy_all }
-          @mobility_after_destroy_translation_classes += translation_classes
-        end
+      setup do |attributes, _options, backend_class|
+        backend_class.define_has_many_association(self, attributes)
+        backend_class.define_initialize_dup(self)
+        backend_class.define_before_save_callback(self)
+        backend_class.define_after_destroy_callback(self)
       end
 
       # Returns translation for a given locale, or builds one if none is present.
